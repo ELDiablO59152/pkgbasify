@@ -10,7 +10,7 @@
 -- See also the pkgbase wiki page: https://wiki.freebsd.org/PkgBase
 
 local repos_conf_dir <const> = "/usr/local/etc/pkg/repos/"
-local repos_conf_file <const> = repos_conf_dir .. "FreeBSD-base.conf"
+local repos_conf_file <const> = repos_conf_dir .. "Vulture-base.conf"
 
 -- Run a command using the OS shell and capture the stdout
 -- Strips exactly one trailing newline if present, does not strip any other whitespace.
@@ -78,14 +78,14 @@ local function create_base_repo_conf(path)
 	assert(os.execute("mkdir -p " .. path:match(".*/")))
 	local f <close> = assert(io.open(path, "w"))
 	assert(f:write(string.format([[
-FreeBSD-base: {
+Vulture_Base: {
   url: "%s",
   mirror_type: "srv",
-  signature_type: "fingerprints",
-  fingerprints: "/usr/share/keys/pkg",
+  signature_type: "PUBKEY",
+  pubkey: "/usr/share/keys/pkg/trusted/pkg.vultureproject.org",
   enabled: yes
 }
-]], base_repo_url())))
+]], "pkg+http://pkg.vultureproject.org/pkgbase/${ABI}-dev")))
 end
 
 -- Set to true if the pkg install or any later step errors. We will always
@@ -139,7 +139,7 @@ local function execute_conversion(workdir, package_list)
 	local packages = table.concat(package_list, " ")
 	-- Fetch the packages separately so that we can retry if there is a temporary
 	-- network issue or similar.
-	while not os.execute("pkg install --fetch-only -y -r FreeBSD-base " .. packages) do
+	while not os.execute("pkg install --fetch-only -y -r Vulture_Base " .. packages) do
 		if not prompt_yn("Fetching packages failed, try again?") then
 			print("Canceled")
 			os.exit(1)
@@ -149,7 +149,7 @@ local function execute_conversion(workdir, package_list)
 	-- pkg install is not necessarily fully atomic, even if it fails some subset
 	-- of the packages may have been installed. Therefore, we must attempt all
 	-- followup work even if install fails.
-	check_err(os.execute("pkg install --no-repo-update -y -r FreeBSD-base " .. packages))
+	check_err(os.execute("pkg install --no-repo-update -y -r Vulture_Base " .. packages))
 
 	merge_pkgsaves(workdir)
 
@@ -196,9 +196,9 @@ end
 -- Returns the osversion as an integer
 local function rquery_osversion(pkg)
 	-- It feels like pkg should provide a less ugly way to do this.
-	-- TODO is FreeBSD-runtime the correct pkg to check against?
-	local tags = capture(pkg .. "rquery -r FreeBSD-base %At FreeBSD-runtime"):gmatch("[^\n]+")
-	local values = capture(pkg .. "rquery -r FreeBSD-base %Av FreeBSD-runtime"):gmatch("[^\n]+")
+	-- TODO is HardenedBSD-runtime the correct pkg to check against?
+	local tags = capture(pkg .. "rquery -r Vulture_Base %At HardenedBSD-runtime"):gmatch("[^\n]+")
+	local values = capture(pkg .. "rquery -r Vulture_Base %Av HardenedBSD-runtime"):gmatch("[^\n]+")
 	while true do
 		local tag = tags()
 		local value = values()
@@ -209,7 +209,7 @@ local function rquery_osversion(pkg)
 			return math.tointeger(value)
 		end
 	end
-	fatal("Missing FreeBSD_version annotation for FreeBSD-runtime package")
+	fatal("Missing FreeBSD_version annotation for HardenedBSD-runtime package")
 end
 
 local function confirm_version_compatibility(pkg)
@@ -269,17 +269,17 @@ local function select_packages(pkg)
 	local src = {}
 	local tests = {}
 
-	local rquery = capture(pkg .. "rquery -r FreeBSD-base %n")
+	local rquery = capture(pkg .. "rquery -r Vulture_Base %n")
 	for package in rquery:gmatch("[^\n]+") do
-		if package == "FreeBSD-src" or package:match("FreeBSD%-src%-.*") then
+		if package == "HardenedBSD-src" or package:match("HardenedBSD%-src%-.*") then
 			table.insert(src, package)
-		elseif package == "FreeBSD-tests" or package:match("FreeBSD%-tests%-.*") then
+		elseif package == "HardenedBSD-tests" or package:match("HardenedBSD%-tests%-.*") then
 			table.insert(tests, package)
-		elseif package:match("FreeBSD%-kernel%-.*") then
-			-- Kernels other than FreeBSD-kernel-generic are ignored
-			if package == "FreeBSD-kernel-generic" then
+		elseif package:match("HardenedBSD%-kernel%-.*") then
+			-- Kernels other than FreeBSD-kernel-hardenedbsd are ignored
+			if package == "HardenedBSD-kernel-hardenedbsd" then
 				table.insert(kernel, package)
-			elseif package == "FreeBSD-kernel-generic-dbg" then
+			elseif package == "HardenedBSD-kernel-hardenedbsd-dbg" then
 				table.insert(kernel_dbg, package)
 			end
 		elseif package:match(".*%-dbg%-lib32") then
@@ -298,7 +298,7 @@ local function select_packages(pkg)
 	assert(#base > 0)
 	assert(#base_dbg > 0)
 	assert(#tests > 0)
-	-- FreeBSD-src was not yet available for FreeBSD 14.0
+	-- HardenedBSD-src was not yet available for FreeBSD 14.0
 	assert(#src >= 0)
 
 	local selected = {}
@@ -340,7 +340,7 @@ local function setup_conversion(workdir)
 	-- Use a temporary repo configuration file for the setup phase so that there
 	-- is nothing to clean up on failure.
 	local tmp_repos = workdir .. "/pkgrepos/"
-	create_base_repo_conf(tmp_repos .. "FreeBSD-base.conf")
+	create_base_repo_conf(tmp_repos .. "Vulture-base.conf")
 
 	local pkg = "pkg -o PKG_DBDIR=" .. tmp_db .. " -R " .. tmp_repos .. " "
 
